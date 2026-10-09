@@ -56,7 +56,11 @@
 
 ## 环境配置
 
-本分支面向 **Python 3.12 x64**，请先进入仓库根目录。Ubuntu 推荐使用 Ubuntu 24.04 x86_64。
+本地环境面向 **Python 3.12 x64**，请先进入仓库根目录。Ubuntu 推荐使用 Ubuntu 24.04 x86_64。
+
+Google Colab 当前的 **Python 3.13 / PyTorch 2.11 / NumPy 2** 环境请使用
+[RVC_Colab.ipynb](./RVC_Colab.ipynb) 和独立的 `requirements_colab.txt`。
+[Colab 设置说明（日语）](./docs/jp/colab.md) 介绍了保留 Colab CUDA 环境的安装和验证步骤。
 
 ### Ubuntu 24.04
 

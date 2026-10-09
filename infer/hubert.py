@@ -4,7 +4,7 @@ from pathlib import Path
 
 import torch
 from torch import nn
-from transformers import AutoFeatureExtractor, HubertModel
+from transformers import AutoFeatureExtractor, HubertModel, __version__ as transformers_version
 
 from tools.cuda_graph import run_cuda_graph
 
@@ -38,8 +38,9 @@ def load_hubert_model(device, is_half=False):
     dtype = torch.float16 if is_half else torch.float32
     load_options = {
         "local_files_only": True,
-        "torch_dtype": dtype,
     }
+    dtype_option = "dtype" if int(transformers_version.split(".")[0]) >= 5 else "torch_dtype"
+    load_options[dtype_option] = dtype
     # DirectML does not implement every SDPA kernel used by Transformers.
     if _device_type(device) == "privateuseone":
         load_options["attn_implementation"] = "eager"

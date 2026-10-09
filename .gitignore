@@ -1,0 +1,5 @@
+# Colab environments, downloaded archives and local verification output.
+.venv-colab/
+.model-downloads/
+.test-outputs/
+__pycache__/

@@ -1,20 +1,17 @@
 import os
+import sys
 import logging
 import warnings
+
+# Direct execution puts train/ first on sys.path, where train.py shadows the
+# train package. Resolve project imports from the repository root instead,
+# including when multiprocessing re-executes this file in a spawned worker.
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
 
 warnings.filterwarnings(
     "ignore",
     message="`torch.nn.utils.weight_norm` is deprecated.*",
-    category=FutureWarning,
-)
-warnings.filterwarnings(
-    "ignore",
-    message="`torch.cuda.amp.GradScaler.*is deprecated.*",
-    category=FutureWarning,
-)
-warnings.filterwarnings(
-    "ignore",
-    message="`torch.cuda.amp.autocast.*is deprecated.*",
     category=FutureWarning,
 )
 warnings.filterwarnings(
@@ -45,7 +42,7 @@ i18n = I18nAuto()
 training_dtype = get_training_dtype()
 training_is_half = training_dtype == torch.float16
 
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
 
 torch.backends.cudnn.deterministic = False
 torch.backends.cudnn.benchmark = False
@@ -287,7 +284,7 @@ def run(rank, n_gpus, hps, logger, use_ddp):
         optim_d, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2
     )
 
-    scaler = GradScaler(enabled=training_is_half)
+    scaler = GradScaler("cuda", enabled=training_is_half)
 
     cache = []
     for epoch in range(epoch_str, hps.train.epochs + 1):
@@ -453,7 +450,7 @@ def train_and_evaluate(
             # wave_lengths = wave_lengths.cuda(rank, non_blocking=True)
 
         # Calculate
-        with autocast(enabled=training_is_half):
+        with autocast("cuda", enabled=training_is_half):
             if hps.if_f0 == 1:
                 (
                     y_hat,
@@ -481,7 +478,7 @@ def train_and_evaluate(
             y_mel = commons.slice_segments(
                 mel, ids_slice, hps.train.segment_size // hps.data.hop_length
             )
-            with autocast(enabled=False):
+            with autocast("cuda", enabled=False):
                 y_hat_mel = mel_spectrogram_torch(
                     y_hat.float().squeeze(1),
                     hps.data.filter_length,
@@ -500,7 +497,7 @@ def train_and_evaluate(
 
             # Discriminator
             y_d_hat_r, y_d_hat_g, _, _ = net_d(wave, y_hat.detach())
-            with autocast(enabled=False):
+            with autocast("cuda", enabled=False):
                 loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(
                     y_d_hat_r, y_d_hat_g
                 )
@@ -510,10 +507,10 @@ def train_and_evaluate(
         grad_norm_d = commons.clip_grad_value_(net_d.parameters(), None)
         scaler.step(optim_d)
 
-        with autocast(enabled=training_is_half):
+        with autocast("cuda", enabled=training_is_half):
             # Generator
             y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = net_d(wave, y_hat)
-            with autocast(enabled=False):
+            with autocast("cuda", enabled=False):
                 loss_mel = F.l1_loss(y_mel, y_hat_mel) * hps.train.c_mel
                 loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * hps.train.c_kl
                 loss_fm = feature_loss(fmap_r, fmap_g)

@@ -11,9 +11,16 @@ def load_language_list(language):
 class I18nAuto:
     def __init__(self, language=None):
         if language in ["Auto", None]:
-            language = locale.getdefaultlocale()[
-                0
-            ]  # getlocale can't identify the system's language ((None, None))
+            # getdefaultlocale() is deprecated and scheduled for removal.
+            # Honor the same environment preference without changing process locale.
+            language = None
+            for variable in ("LC_ALL", "LC_CTYPE", "LANG", "LANGUAGE"):
+                value = os.environ.get(variable, "").split(":")[0]
+                if value:
+                    language = value.split(".")[0].split("@")[0]
+                    break
+            if not language:
+                language = locale.getlocale()[0]
         if not os.path.exists(f"./i18n/locale/{language}.json"):
             language = "en_US"
         self.language = language
