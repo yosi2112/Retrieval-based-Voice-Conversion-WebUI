@@ -51,6 +51,12 @@ from tools.pymss_webui import (
     stop_pymss_separation as _stop_pymss_separation_core,
 )
 from tools.file_io import read_text
+from tools.gradio_compat import (
+    audio_upload_options,
+    blocks_css_options,
+    launch_css_options,
+    queue_app,
+)
 from tools.process_utils import kill_process_tree
 from tools.multispeaker import (
     ManifestError,
@@ -114,7 +120,7 @@ def is_gradio_port_in_use_error(error, port):
 def launch_webui_with_port_fallback(app, config):
     """Launch Gradio, increasing the requested port until startup succeeds."""
     next_port = config.listen_port
-    queued_app = app.queue(concurrency_count=511, max_size=1022)
+    queued_app = queue_app(app)
     while True:
         config.listen_port = find_available_port(next_port)
         if config.listen_port != next_port:
@@ -129,6 +135,7 @@ def launch_webui_with_port_fallback(app, config):
                 inbrowser=not config.noautoopen,
                 server_port=config.listen_port,
                 quiet=True,
+                **launch_css_options(TRAINING_INFO_CSS),
             )
             return config.listen_port
         except OSError as error:
@@ -184,16 +191,6 @@ else:
 gpus = "-".join(str(i) for i in gpu_indices)
 feature_gpus = "%s-%s" % (gpus, gpus) if gpus else ""
 default_training_f0_method = "rmvpe" if IS_GPU else "pm"
-
-
-class ToolButton(gr.Button, gr.components.FormComponent):
-    """Small button with single emoji as text, fits inside gradio forms"""
-
-    def __init__(self, **kwargs):
-        super().__init__(variant="tool", **kwargs)
-
-    def get_block_name(self):
-        return "button"
 
 
 weight_root = os.getenv("weight_root")
@@ -326,16 +323,16 @@ def change_training_mode(training_mode):
         else i18n("输入训练文件夹路径")
     )
     placeholder = i18n("留空则使用辅助页已提交的清单") if multi else ""
-    textbox_update = gr.Textbox.update(label=label, placeholder=placeholder)
+    textbox_update = gr.update(label=label, placeholder=placeholder)
     if multi:
         textbox_update["value"] = ""
-    return textbox_update, gr.Slider.update(visible=not multi)
+    return textbox_update, gr.update(visible=not multi)
 
 
 def sync_exp_name(source_value, target_value):
     if str(source_value or "") == str(target_value or ""):
-        return gr.Textbox.update()
-    return gr.Textbox.update(value=source_value)
+        return gr.update()
+    return gr.update(value=source_value)
 
 
 def empty_multispeaker_rows():
@@ -376,13 +373,13 @@ def multispeaker_page_updates(rows, active_count, page):
         row = rows[index] if index < len(rows) else ["", "", "", ""]
         updates.extend(
             [
-                gr.Textbox.update(value=row[0], visible=visible),
-                gr.Textbox.update(value=row[1], visible=visible),
-                gr.Number.update(
+                gr.update(value=row[0], visible=visible),
+                gr.update(value=row[1], visible=visible),
+                gr.update(
                     value=row[2] if row[2] not in ("", None) else None,
                     visible=visible,
                 ),
-                gr.Number.update(
+                gr.update(
                     value=row[3] if row[3] not in ("", None) else None,
                     visible=visible,
                 ),
@@ -778,7 +775,7 @@ def train_task_stopped(state):
 
 def start_train_process(state, cmd):
     kwargs = {"shell": True, "cwd": now_dir}
-    if "train/train.py" in cmd.replace("\\", "/"):
+    if "train/train.py" in cmd.replace("\\", "/") or "-m train.train" in cmd:
         training_env = os.environ.copy()
         training_env["RVC_CUDA_GRAPH"] = "0"
         kwargs["env"] = training_env
@@ -864,7 +861,7 @@ def run_preprocess_dataset(
         if is_multispeaker_mode(training_mode)
         else ""
     )
-    cmd = '"%s" train/preprocess.py "%s" %s %s "%s/logs/%s" %s %.1f%s' % (
+    cmd = '"%s" -m train.preprocess "%s" %s %s "%s/logs/%s" %s %.1f%s' % (
         config.python_cmd,
         trainset_dir,
         sr,
@@ -967,7 +964,7 @@ def run_extract_f0_feature(
             f0method == "rmvpe" and not rmvpe_devices and not config.dml
         ):
             cmd = (
-                '"%s" train/dataset/extract_f0.py cpu "%s/logs/%s" %s %s'
+                '"%s" -m train.dataset.extract_f0 cpu "%s/logs/%s" %s %s'
                 % (config.python_cmd, now_dir, exp_dir, n_p, f0method)
             )
             processes.append(start_train_process(state, cmd))
@@ -975,7 +972,7 @@ def run_extract_f0_feature(
             count = len(rmvpe_devices)
             for index, gpu in enumerate(rmvpe_devices):
                 cmd = (
-                    '"%s" train/dataset/extract_f0.py cuda %s %s %s "%s/logs/%s" %s'
+                    '"%s" -m train.dataset.extract_f0 cuda %s %s %s "%s/logs/%s" %s'
                     % (
                         config.python_cmd,
                         count,
@@ -989,7 +986,7 @@ def run_extract_f0_feature(
                 processes.append(start_train_process(state, cmd))
         else:
             cmd = (
-                '"%s" train/dataset/extract_f0.py dml "%s/logs/%s"'
+                '"%s" -m train.dataset.extract_f0 dml "%s/logs/%s"'
                 % (config.python_cmd, now_dir, exp_dir)
             )
             processes.append(start_train_process(state, cmd))
@@ -1008,7 +1005,7 @@ def run_extract_f0_feature(
         count = len(feature_gpus)
         for index, gpu in enumerate(feature_gpus):
             cmd = (
-                '"%s" train/dataset/extract_hubert_feature.py %s %s %s %s "%s/logs/%s" %s %s'
+                '"%s" -m train.dataset.extract_hubert_feature %s %s %s %s "%s/logs/%s" %s %s'
                 % (
                     config.python_cmd,
                     config.device,
@@ -1024,7 +1021,7 @@ def run_extract_f0_feature(
             processes.append(start_train_process(state, cmd))
     else:
         cmd = (
-            '"%s" train/dataset/extract_hubert_feature.py %s 1 0 "%s/logs/%s" %s %s'
+            '"%s" -m train.dataset.extract_hubert_feature %s 1 0 "%s/logs/%s" %s %s'
             % (
                 config.python_cmd,
                 config.device,
@@ -1307,7 +1304,7 @@ def run_train_model(
         f.write("\n")
     if gpus16:
         cmd = (
-            '"%s" train/train.py -e "%s" -sr %s -f0 %s -bs %s -g %s -te %s -se %s %s %s -l %s -c %s -sw %s -v %s'
+            '"%s" -m train.train -e "%s" -sr %s -f0 %s -bs %s -g %s -te %s -se %s %s %s -l %s -c %s -sw %s -v %s'
             % (
                 config.python_cmd,
                 exp_dir1,
@@ -1327,7 +1324,7 @@ def run_train_model(
         )
     else:
         cmd = (
-            '"%s" train/train.py -e "%s" -sr %s -f0 %s -bs %s -te %s -se %s %s %s -l %s -c %s -sw %s -v %s'
+            '"%s" -m train.train -e "%s" -sr %s -f0 %s -bs %s -te %s -se %s %s %s -l %s -c %s -sw %s -v %s'
             % (
                 config.python_cmd,
                 exp_dir1,
@@ -1458,7 +1455,7 @@ def run_train_index(
         else "auto"
     )
     cmd = (
-        '"%s" train/train_index.py "%s" %s "%s" %s %s'
+        '"%s" -m train.train_index "%s" %s "%s" %s %s'
         % (
             config.python_cmd,
             exp_dir1,
@@ -1826,7 +1823,7 @@ def change_f0_method(f0method8):
     return {"visible": visible, "__type__": "update"}
 
 
-with gr.Blocks(title="RVC WebUI", css=TRAINING_INFO_CSS) as app:
+with gr.Blocks(title="RVC WebUI", **blocks_css_options(TRAINING_INFO_CSS)) as app:
     gr.Markdown("## RVC WebUI")
     gr.Markdown(
         value=i18n(
@@ -1880,7 +1877,7 @@ with gr.Blocks(title="RVC WebUI", css=TRAINING_INFO_CSS) as app:
                                     )
                             input_audio0 = gr.Audio(
                                 label=i18n("拖拽或点击上传待处理音频"),
-                                source="upload",
+                                **audio_upload_options(),
                                 type="filepath",
                                 interactive=True,
                             )
@@ -2839,6 +2836,6 @@ with gr.Blocks(title="RVC WebUI", css=TRAINING_INFO_CSS) as app:
                 gr.Markdown(traceback.format_exc())
 
     if config.iscolab:
-        app.queue(concurrency_count=511, max_size=1022).launch(share=True)
+        queue_app(app).launch(share=True, **launch_css_options(TRAINING_INFO_CSS))
     else:
         launch_webui_with_port_fallback(app, config)

@@ -212,7 +212,10 @@ def _resample_tensor_gpu(audio, source_sr, target_sr, force_mono=True, keep_on_d
 
 
 def _load_audio_torchaudio_gpu(file, sr, force_mono=True, keep_on_device=False):
-    audio, source_sr = _TORCHAUDIO.load(file)
+    # TorchAudio 2.9+ delegates load() to TorchCodec, whose binary build must
+    # match Torch and FFmpeg. Decode through the existing FFmpeg backend and
+    # keep TorchAudio's CUDA resampler without adding another binary ABI.
+    audio, source_sr = _decode_audio_ffmpeg(file)
     return _resample_tensor_gpu(audio, source_sr, sr, force_mono, keep_on_device)
 
 
